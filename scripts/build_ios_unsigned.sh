@@ -4,10 +4,16 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-set -eo pipefail
+set -euo pipefail
 
 cd "$(dirname "$0")"
 cd ../
+
+if [ -x "./.flutter/bin/flutter" ]; then
+    FLUTTER="./.flutter/bin/flutter"
+else
+    FLUTTER="flutter"
+fi
 
 export FLUTTER_STORAGE_BASE_URL="${FLUTTER_STORAGE_BASE_URL:-https://storage.flutter-io.cn}"
 
@@ -22,11 +28,13 @@ restore_share_extension_plist() {
 
 trap restore_share_extension_plist EXIT
 
-echo "COCOPOD VERSION: $(pod --version)"
-flutter pub get
+BUILD_NUM=$(git rev-list --count HEAD)
+echo "Build Number: $BUILD_NUM"
 
-# Download the required libraries
-export LIBS_URL="https://github.com/GitJournal/ios-libraries/releases/download/v1.2/libs.zip"
+BUILD_NAME=$(grep '^version:' pubspec.yaml | awk '{ print $2 }' | awk -F "+" '{ print $1 }')
+echo "Build Name: $BUILD_NAME"
+
+LIBS_URL="https://github.com/GitJournal/ios-libraries/releases/download/v1.2/libs.zip"
 
 normalize_ios_libs() {
     for lib in git2 ssh2 ssl crypto; do
@@ -36,45 +44,37 @@ normalize_ios_libs() {
     done
 }
 
-if [ ! -d "ios/libs" ]; then
-    echo "Downloading Libs"
-    wget -q "$LIBS_URL"
-    cd ios
-    unzip -q ../libs.zip
-    cd -
-    rm libs.zip
+if [ ! -d "ios/libs/include" ]; then
+    echo "Downloading iOS native libraries"
+    rm -rf ios/libs
+    mkdir -p ios/libs
+    curl -L --fail "$LIBS_URL" -o /tmp/gitjournal-ios-libs.zip
+    unzip -q /tmp/gitjournal-ios-libs.zip -d ios/libs
+
+    if [ -d "ios/libs/libs" ]; then
+        mv ios/libs/libs/* ios/libs/
+        rmdir ios/libs/libs
+    fi
 fi
 
 normalize_ios_libs
 
-# Place gj_common
 if [ ! -L "gj_common" ]; then
-    echo "=> gj_common doesn't exist. Cloning"
-    git clone https://github.com/GitJournal/git_bindings.git
+    echo "Setting up gj_common"
+    if [ ! -d "git_bindings" ]; then
+        git clone --depth 1 https://github.com/GitJournal/git_bindings.git
+    fi
     ln -s git_bindings/gj_common gj_common
 fi
 
-BUILD_NUM=$(git rev-list --count HEAD)
-echo "Build Number: $BUILD_NUM"
-
-BUILD_NAME=$(cat pubspec.yaml | grep version | awk '{ print $2 }' | awk -F "+" '{ print $1 }')
-echo "Build Name: $BUILD_NAME"
+$FLUTTER pub get
+$FLUTTER precache --ios
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUILD_NAME" "$SHARE_EXTENSION_PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" "$SHARE_EXTENSION_PLIST"
 
-xcodebuild -version
-
-flutter build ios --release --no-codesign --build-number="$BUILD_NUM" --build-name="$BUILD_NAME" --dart-define=INSTALL_SOURCE=appstore
-
 cd ios
+pod install
+cd ../
 
-export FASTLANE_PASSWORD=$(cat keys/fastlane_password)
-
-echo "Updating fastlane ..."
-bundle exec fastlane --version
-bundle update fastlane
-bundle exec fastlane --version
-
-echo "fastlane release ..."
-bundle exec fastlane release
+$FLUTTER build ios --release --no-codesign --build-number="$BUILD_NUM" --build-name="$BUILD_NAME" --dart-define=INSTALL_SOURCE=appstore

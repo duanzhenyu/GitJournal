@@ -2,6 +2,8 @@
 
 Current verified macOS flow for building the Android `dev/debug APK` is documented in [`docs/android-dev-build.md`](docs/android-dev-build.md). The instructions below are older and should be treated as historical context.
 
+Current unsigned iOS local build flow is documented in [`docs/ios-unsigned-build.md`](docs/ios-unsigned-build.md).
+
 Android 打包版本号的当前说明也以 [`docs/android-dev-build.md`](docs/android-dev-build.md) 为准。简要规则是：
 
 - 默认版本来源于 [`pubspec.yaml`](pubspec.yaml) 的 `version: x.y.z+N`
